@@ -1,124 +1,64 @@
-import os
-import feedparser
-import aiohttp
 import logging
 import asyncio
+import aiohttp
+import feedparser
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from pyrogram.errors import FloodWait
-import re
-from dateutil import parser
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
-# Set your configuration here
+# Your API credentials and channel configuration
 API_ID = 8143727
 API_HASH = "e2e9b22c6522465b62d8445840a526b1"
 BOT_TOKEN = "8150136049:AAH1nLTe3rn80g9ONUbogVD4cUApZenSleY"
-CHANNEL_ID = '@CryptoNewsLibrary'  # Replace with your channel ID
+CHANNEL_ID = '@CryptoNewsLibrary'  # Your Telegram channel ID
 RSS_URL = "https://decrypt.co/feed"  # Decrypt RSS feed
+LAST_TITLE_FILE = "last_title.txt"  # File to store the last sent title
 
-# Paths for storing state
-LAST_SENT_TIMESTAMP_FILE = "last_sent_timestamp.txt"
-SENT_UPDATES_FILE = "sent_updates.txt"
-
-# Initialize the Pyrogram client
+# Create a Pyrogram client
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Load last sent timestamp
-def load_last_sent_timestamp():
-    if os.path.exists(LAST_SENT_TIMESTAMP_FILE):
-        with open(LAST_SENT_TIMESTAMP_FILE, 'r') as file:
-            return parser.parse(file.read().strip())
-    return None
+def load_last_title():
+    """Load the last sent title from a text file."""
+    try:
+        with open(LAST_TITLE_FILE, "r") as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None  # Return None if the file doesn't exist
 
-# Save the last sent timestamp
-def save_last_sent_timestamp(timestamp):
-    with open(LAST_SENT_TIMESTAMP_FILE, 'w') as file:
-        file.write(timestamp.isoformat())
+def save_last_title(title):
+    """Save the last sent title to a text file."""
+    with open(LAST_TITLE_FILE, "w") as file:
+        file.write(title)
 
-# Load sent updates from a file
-def load_sent_updates():
-    if os.path.exists(SENT_UPDATES_FILE):
-        with open(SENT_UPDATES_FILE, 'r') as file:
-            return set(line.strip() for line in file)
-    return set()
+async def fetch_rss_feed(url):
+    """Fetch the RSS feed using aiohttp."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            rss_content = await response.text()
+            return feedparser.parse(rss_content)
 
-# Save a new sent update
-def save_sent_update(title):
-    with open(SENT_UPDATES_FILE, 'a') as file:
-        file.write(title + '\n')
+async def send_latest_feed_to_telegram(last_sent_title):
+    """Fetch and send the latest RSS feed to Telegram."""
+    # Fetch and parse the RSS feed
+    feed = await fetch_rss_feed(RSS_URL)
 
-# Async function to fetch and send updates
-async def fetch_and_send_updates():
-    last_sent_timestamp = load_last_sent_timestamp()
-    sent_updates = load_sent_updates()  # Load previously sent updates
+    if feed.entries:
+        latest_entry = feed.entries[0]  # Get the latest entry
+        title = latest_entry.title
+        description = latest_entry.description
 
-    while True:
-        try:
-            logging.info("Fetching RSS feed...")
-            feed = feedparser.parse(RSS_URL)
+        # Check if the latest title has already been sent
+        if title != last_sent_title:
+            # Create a message with title and description
+            message = f"<b>{title}</b>\n{description}"
 
-            new_updates_count = 0
-            latest_entries = []
+            # Send the message to the Telegram channel
+            await app.send_message(CHANNEL_ID, message, parse_mode="html")
 
-            for entry in feed.entries:
-                # Log the entry for debugging
-                logging.debug(f"Feed Entry: {entry}")
-                
-                # Get the publication date and title
-                published = parser.parse(entry.pubDate) if hasattr(entry, 'pubDate') else None
-                title = entry.title
-                guid = entry.guid if hasattr(entry, 'guid') else title  # Use GUID or title if GUID is missing
-
-                # Add entry to the list to send if not already sent
-                if guid not in sent_updates:
-                    latest_entries.append(entry)
-
-            for entry in latest_entries:
-                title = entry.title
-                guid = entry.guid if hasattr(entry, 'guid') else title
-                published = parser.parse(entry.pubDate) if hasattr(entry, 'pubDate') else None
-
-                # Check if the update is new
-                if published and (last_sent_timestamp is None or published > last_sent_timestamp):
-                    last_sent_timestamp = max(last_sent_timestamp, published) if last_sent_timestamp else published
-                    save_last_sent_timestamp(last_sent_timestamp)
-
-                    # Check for description and format the message accordingly
-                    description = entry.description if hasattr(entry, 'description') else None
-                    if description:
-                        message = f"🔔 Latest Update: **{title}**\n\n{description}"  # Include title and description
-                    else:
-                        message = f"**{title}**"  # Only include title if no description
-
-                    # Send the entry
-                    await app.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=message,
-                        disable_web_page_preview=True
-                    )
-                    logging.info(f"Sent update with title: {title}")
-
-                    # Mark this update as sent
-                    sent_updates.add(guid)
-                    save_sent_update(guid)  # Store the GUID or title of the sent update
-                    new_updates_count += 1
-
-            if new_updates_count > 0:
-                logging.info(f"Sent {new_updates_count} updates.")
-            else:
-                logging.info("No new updates found.")
-
-            await asyncio.sleep(60)  # Wait for a minute before fetching again
-
-        except FloodWait as e:
-            logging.warning(f"Flood wait triggered. Waiting for {e.x} seconds.")
-            await asyncio.sleep(e.x)
-        except Exception as e:
-            logging.error(f"An error occurred: {e}")
-            await asyncio.sleep(60)
+            # Update the last sent title
+            save_last_title(title)
 
 # Handler for the /start command
 @app.on_message(filters.command("start") & filters.private)
@@ -130,6 +70,14 @@ async def start(client, message):
         text="Welcome to the Crypto News Bot! Updates will be sent to the channel.",
         reply_markup=button
     )
+
+async def fetch_and_send_updates():
+    """Periodically fetch updates from the RSS feed."""
+    last_sent_title = load_last_title()  # Load the last sent title
+
+    while True:
+        await send_latest_feed_to_telegram(last_sent_title)
+        await asyncio.sleep(60)  # Wait for one minute before checking again
 
 # Main entry point
 if __name__ == '__main__':

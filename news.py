@@ -17,7 +17,7 @@ API_ID = 8143727
 API_HASH = "e2e9b22c6522465b62d8445840a526b1"
 BOT_TOKEN = "8150136049:AAH1nLTe3rn80g9ONUbogVD4cUApZenSleY"
 CHANNEL_ID = '@CryptoNewsLibrary'  # Replace with your channel ID
-RSS_URL = "https://www.coindesk.com/arc/outboundfeeds/rss/"  # Coindesk RSS feed
+RSS_URL = "https://decrypt.co/feed"  # Decrypt RSS feed
 
 # Paths for storing state
 LAST_SENT_TIMESTAMP_FILE = "last_sent_timestamp.txt"
@@ -86,9 +86,12 @@ async def fetch_and_send_updates():
                     last_sent_timestamp = max(last_sent_timestamp, published) if last_sent_timestamp else published
                     save_last_sent_timestamp(last_sent_timestamp)
 
-                    # Format the message to send
-                    description = entry.description if hasattr(entry, 'description') else "No description available."
-                    message = f"**{title}**\n\n{description}\n\n[Read More]({entry.link})"
+                    # Check for description and format the message accordingly
+                    description = entry.description if hasattr(entry, 'description') else None
+                    if description:
+                        message = f"🔔 Latest Update: **{title}**\n\n{description}"  # Include title and description
+                    else:
+                        message = f"**{title}**"  # Only include title if no description
 
                     # Send the entry
                     await app.send_message(

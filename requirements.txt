@@ -1,7 +1,4 @@
 pyrogram
 tgcrypto
 feedparser
-requests
 aiohttp
-python-dateutil
-python-dotenv

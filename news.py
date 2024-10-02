@@ -41,24 +41,24 @@ async def fetch_rss_feed(url):
 
 async def send_latest_feed_to_telegram(last_sent_title):
     """Fetch and send the latest RSS feed to Telegram."""
-    # Fetch and parse the RSS feed
     feed = await fetch_rss_feed(RSS_URL)
 
     if feed.entries:
-        latest_entry = feed.entries[0]  # Get the latest entry
+        latest_entry = feed.entries[0]
         title = latest_entry.title
         description = latest_entry.description
 
-        # Check if the latest title has already been sent
         if title != last_sent_title:
-            # Create a message with title and description
-            message = f"<b>{title}</b>\n{description}"
+            # Encode special characters for HTML
+            message = f"<b>{title}</b>\n{description.replace('&', '&amp;')}"
 
-            # Send the message to the Telegram channel
-            await app.send_message(CHANNEL_ID, message, parse_mode="html")
-
-            # Update the last sent title
-            save_last_title(title)
+            try:
+                await app.send_message(CHANNEL_ID, message, parse_mode="html")
+                save_last_title(title)  # Update last sent title
+            except ValueError as e:
+                logging.error(f"Failed to send message: {e}")
+                # Fallback to sending as plain text if needed
+                await app.send_message(CHANNEL_ID, message)
 
 # Handler for the /start command
 @app.on_message(filters.command("start") & filters.private)
@@ -73,10 +73,13 @@ async def start(client, message):
 
 async def fetch_and_send_updates():
     """Periodically fetch updates from the RSS feed."""
-    last_sent_title = load_last_title()  # Load the last sent title
+    last_sent_title = load_last_title()
 
     while True:
-        await send_latest_feed_to_telegram(last_sent_title)
+        try:
+            await send_latest_feed_to_telegram(last_sent_title)
+        except Exception as e:
+            logging.error(f"Error fetching and sending updates: {e}")
         await asyncio.sleep(60)  # Wait for one minute before checking again
 
 # Main entry point
